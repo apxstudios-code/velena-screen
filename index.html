@@ -26,6 +26,8 @@
     let pending   = null;   // gepufferter play-Befehl, bis YouTube-API bereit ist
     let looping   = false;
     let curVideo  = null;
+    let syncBase  = null;   // Date.now()-Anker der gemeinsamen Zeitlinie (ms);
+                            // Sollposition = (Date.now() - syncBase) / 1000
 
     const imgEl = document.getElementById('img');
 
@@ -93,6 +95,7 @@
 
         if (player && apiReady) { player.stopVideo(); }
         curVideo = null;
+        syncBase = null; // Twitch synct sich selbst (live) bzw. via time-Param
         playerEl().style.display = 'none';
         imgEl.style.display = 'none';
         imgEl.src = '';
@@ -149,15 +152,20 @@
         imgEl.src = '';
         looping = d.loop === true;
 
+        // Zeitlinien-Anker: berücksichtigt auch die Zeit zwischen
+        // Nachrichten-Eingang (d._t) und tatsächlichem Start
+        syncBase = (d._t || Date.now()) - (d.start || 0) * 1000;
+
         vidEl.style.display = 'block';
         vidEl.loop = looping;
         vidEl.volume = Math.max(0, Math.min(100, d.volume || 0)) / 100;
         vidEl.src = d.url;
         vidEl.addEventListener('loadedmetadata', function once() {
             vidEl.removeEventListener('loadedmetadata', once);
-            if (d.start && d.start > 0 && isFinite(vidEl.duration) && vidEl.duration > 0) {
-                vidEl.currentTime = looping ? (d.start % vidEl.duration)
-                    : Math.min(d.start, Math.max(vidEl.duration - 0.5, 0));
+            const target = (Date.now() - syncBase) / 1000;
+            if (target > 0 && isFinite(vidEl.duration) && vidEl.duration > 0) {
+                vidEl.currentTime = looping ? (target % vidEl.duration)
+                    : Math.min(target, Math.max(vidEl.duration - 0.5, 0));
             }
             vidEl.play().catch(function () {});
         });
@@ -172,7 +180,12 @@
         curVideo = d.videoId;
         looping  = d.loop === true;
         playerEl().style.display = 'block';
-        player.loadVideoById({ videoId: d.videoId, startSeconds: d.start || 0 });
+
+        // Zeitlinien-Anker (inkl. Wartezeit bis YT-API bereit war)
+        syncBase = (d._t || Date.now()) - (d.start || 0) * 1000;
+        const startNow = Math.max((Date.now() - syncBase) / 1000, 0);
+
+        player.loadVideoById({ videoId: d.videoId, startSeconds: startNow });
         player.setVolume(Math.max(0, Math.min(100, d.volume || 0)));
         player.playVideo();
     }
@@ -182,6 +195,7 @@
         killTwitch();
         killVideo();
         curVideo = null;
+        syncBase = null;
         playerEl().style.display = 'none';
         imgEl.src = url;
         imgEl.style.display = 'block';
@@ -193,6 +207,7 @@
         killVideo();
         pendingTwitch = null;
         curVideo = null;
+        syncBase = null;
         playerEl().style.display = 'none';
         imgEl.style.display = 'none';
         imgEl.src = '';
@@ -211,12 +226,14 @@
 
         switch (d.action) {
             case 'play':
+                d._t = Date.now(); // Eingangszeit für den Zeitlinien-Anker
                 if (apiReady) { doPlay(d); } else { pending = d; }
                 break;
             case 'twitch':
                 doTwitch(d);
                 break;
             case 'file':
+                d._t = Date.now();
                 doFile(d);
                 break;
             case 'image':
@@ -238,6 +255,45 @@
                 break;
         }
     });
+
+    // ----------------------------------------------------------------
+    // Drift-Korrektur: alle 3s Soll- vs. Istposition vergleichen.
+    // Kostet praktisch nichts (2 Zahlenvergleiche pro Tick), hält aber
+    // mehrere Screens trotz unterschiedlichem Buffering synchron.
+    // ----------------------------------------------------------------
+    setInterval(function () {
+        if (syncBase === null) return;
+        const target = (Date.now() - syncBase) / 1000;
+
+        // YouTube: harter Seek erst ab >1s Abweichung (Seek = kurzes Buffern)
+        if (curVideo && player && apiReady
+            && player.getPlayerState && player.getPlayerState() === YT.PlayerState.PLAYING) {
+            const dur = player.getDuration ? (player.getDuration() || 0) : 0;
+            let t = target;
+            if (looping && dur > 0) { t = target % dur; }
+            if (!(!looping && dur > 0 && t >= dur)) {
+                if (Math.abs(player.getCurrentTime() - t) > 1.0) {
+                    player.seekTo(t, true);
+                }
+            }
+        }
+
+        // Videodatei: kleine Drift unhörbar über Abspielgeschwindigkeit
+        // angleichen (3%), nur große Sprünge per Seek
+        if (vidEl.style.display === 'block' && !vidEl.paused
+            && isFinite(vidEl.duration) && vidEl.duration > 0) {
+            const t = looping ? (target % vidEl.duration) : Math.min(target, vidEl.duration);
+            const drift = vidEl.currentTime - t;
+            if (Math.abs(drift) > 0.8) {
+                vidEl.currentTime = t + 0.05;
+                vidEl.playbackRate = 1;
+            } else if (Math.abs(drift) > 0.15) {
+                vidEl.playbackRate = drift > 0 ? 0.97 : 1.03;
+            } else if (vidEl.playbackRate !== 1) {
+                vidEl.playbackRate = 1;
+            }
+        }
+    }, 3000);
 </script>
 </body>
 </html>
