@@ -176,6 +176,12 @@
             vidEl.play().catch(function () {});
         });
         vidEl.play().catch(function () {});
+
+        // Optionales Visual (Bild/GIF) über der Audio-Wiedergabe anzeigen
+        if (d.visual) {
+            imgEl.src = d.visual;
+            imgEl.style.display = 'block';
+        }
     }
 
     function doPlay(d) {
