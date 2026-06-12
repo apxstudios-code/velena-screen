@@ -10,11 +10,13 @@
     #twitch    { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
     #twitch iframe { width: 100%; height: 100%; }
     #img       { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: none; }
+    #vid       { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: none; background: #000; }
 </style>
 </head>
 <body>
 <div id="player"></div>
 <div id="twitch"></div>
+<video id="vid" playsinline></video>
 <img id="img" alt="">
 <script>
     // DUI-Player: empfängt Befehle via SendDuiMessage (window message events)
@@ -124,8 +126,47 @@
         });
     }
 
+    // ---------- Direkte Videodatei (mp4/webm – werbefrei) ----------
+    const vidEl = document.getElementById('vid');
+
+    function killVideo() {
+        vidEl.pause();
+        vidEl.removeAttribute('src');
+        vidEl.load();
+        vidEl.style.display = 'none';
+    }
+
+    vidEl.addEventListener('ended', function () {
+        if (looping) { vidEl.currentTime = 0; vidEl.play(); }
+    });
+
+    function doFile(d) {
+        if (player && apiReady) { player.stopVideo(); }
+        killTwitch();
+        curVideo = null;
+        playerEl().style.display = 'none';
+        imgEl.style.display = 'none';
+        imgEl.src = '';
+        looping = d.loop === true;
+
+        vidEl.style.display = 'block';
+        vidEl.loop = looping;
+        vidEl.volume = Math.max(0, Math.min(100, d.volume || 0)) / 100;
+        vidEl.src = d.url;
+        vidEl.addEventListener('loadedmetadata', function once() {
+            vidEl.removeEventListener('loadedmetadata', once);
+            if (d.start && d.start > 0 && isFinite(vidEl.duration) && vidEl.duration > 0) {
+                vidEl.currentTime = looping ? (d.start % vidEl.duration)
+                    : Math.min(d.start, Math.max(vidEl.duration - 0.5, 0));
+            }
+            vidEl.play().catch(function () {});
+        });
+        vidEl.play().catch(function () {});
+    }
+
     function doPlay(d) {
         killTwitch();
+        killVideo();
         imgEl.style.display = 'none';
         imgEl.src = '';
         curVideo = d.videoId;
@@ -139,6 +180,7 @@
     function doImage(url) {
         if (player && apiReady) { player.stopVideo(); }
         killTwitch();
+        killVideo();
         curVideo = null;
         playerEl().style.display = 'none';
         imgEl.src = url;
@@ -148,6 +190,7 @@
     function doStop() {
         if (player && apiReady) { player.stopVideo(); }
         killTwitch();
+        killVideo();
         pendingTwitch = null;
         curVideo = null;
         playerEl().style.display = 'none';
@@ -173,17 +216,22 @@
             case 'twitch':
                 doTwitch(d);
                 break;
+            case 'file':
+                doFile(d);
+                break;
             case 'image':
                 doImage(d.url);
                 break;
             case 'volume': {
                 const v = Math.max(0, Math.min(100, d.volume || 0));
-                if (twitch) { twitch.setVolume(v / 100); }
+                if (vidEl.style.display === 'block') { vidEl.volume = v / 100; }
+                else if (twitch) { twitch.setVolume(v / 100); }
                 else if (player && apiReady) { player.setVolume(v); }
                 break;
             }
             case 'loop':
                 looping = d.loop === true;
+                vidEl.loop = looping;
                 break;
             case 'stop':
                 doStop();
