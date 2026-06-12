@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- YouTube Error 153 Fix: gültige Referrer-Policy, sonst blockt der Embed-Player -->
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+    #player    { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+    #img       { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: none; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<img id="img" alt="">
+<script>
+    // DUI-Player: empfängt Befehle via SendDuiMessage (window message events)
+    // Aktionen: play {videoId, start, volume, loop} | image {url} | volume {volume} | loop {loop} | stop
+    let player    = null;
+    let apiReady  = false;
+    let pending   = null;   // gepufferter play-Befehl, bis YouTube-API bereit ist
+    let looping   = false;
+    let curVideo  = null;
+
+    const imgEl = document.getElementById('img');
+
+    // YouTube IFrame API laden
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+
+    window.onYouTubeIframeAPIReady = function () {
+        player = new YT.Player('player', {
+            width: '100%',
+            height: '100%',
+            // youtube-nocookie umgeht den strikten Referer-Check (Error 153)
+            host: 'https://www.youtube-nocookie.com',
+            playerVars: {
+                autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1,
+                rel: 0, iv_load_policy: 3, fs: 0, playsinline: 1
+            },
+            events: {
+                onReady: function () {
+                    apiReady = true;
+                    if (pending) { doPlay(pending); pending = null; }
+                },
+                onStateChange: function (e) {
+                    if (e.data === YT.PlayerState.ENDED && looping && curVideo) {
+                        player.seekTo(0, true);
+                        player.playVideo();
+                    }
+                }
+            }
+        });
+    };
+
+    function playerEl() {
+        // YT.Player ersetzt #player durch ein iframe mit derselben ID
+        return document.getElementById('player');
+    }
+
+    function doPlay(d) {
+        imgEl.style.display = 'none';
+        imgEl.src = '';
+        curVideo = d.videoId;
+        looping  = d.loop === true;
+        playerEl().style.display = 'block';
+        player.loadVideoById({ videoId: d.videoId, startSeconds: d.start || 0 });
+        player.setVolume(Math.max(0, Math.min(100, d.volume || 0)));
+        player.playVideo();
+    }
+
+    function doImage(url) {
+        if (player && apiReady) { player.stopVideo(); }
+        curVideo = null;
+        playerEl().style.display = 'none';
+        imgEl.src = url;
+        imgEl.style.display = 'block';
+    }
+
+    function doStop() {
+        if (player && apiReady) { player.stopVideo(); }
+        curVideo = null;
+        playerEl().style.display = 'none';
+        imgEl.style.display = 'none';
+        imgEl.src = '';
+    }
+
+    window.addEventListener('message', function (event) {
+        const d = event.data;
+        if (!d || !d.action) return;
+
+        switch (d.action) {
+            case 'play':
+                if (apiReady) { doPlay(d); } else { pending = d; }
+                break;
+            case 'image':
+                doImage(d.url);
+                break;
+            case 'volume':
+                if (player && apiReady) { player.setVolume(Math.max(0, Math.min(100, d.volume || 0))); }
+                break;
+            case 'loop':
+                looping = d.loop === true;
+                break;
+            case 'stop':
+                doStop();
+                break;
+        }
+    });
+</script>
+</body>
+</html>
