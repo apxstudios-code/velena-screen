@@ -7,11 +7,14 @@
 <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
     #player    { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+    #twitch    { position: absolute; inset: 0; width: 100%; height: 100%; display: none; }
+    #twitch iframe { width: 100%; height: 100%; }
     #img       { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: none; }
 </style>
 </head>
 <body>
 <div id="player"></div>
+<div id="twitch"></div>
 <img id="img" alt="">
 <script>
     // DUI-Player: empfängt Befehle via SendDuiMessage (window message events)
@@ -59,7 +62,70 @@
         return document.getElementById('player');
     }
 
+    // ---------- Twitch ----------
+    let twitch = null;
+    let twitchApiRequested = false;
+    let pendingTwitch = null;
+    const twitchEl = document.getElementById('twitch');
+
+    function killTwitch() {
+        twitch = null;
+        twitchEl.innerHTML = '';
+        twitchEl.style.display = 'none';
+    }
+
+    function doTwitch(d) {
+        if (!(window.Twitch && window.Twitch.Player)) {
+            pendingTwitch = d;
+            if (!twitchApiRequested) {
+                twitchApiRequested = true;
+                const s = document.createElement('script');
+                s.src = 'https://player.twitch.tv/js/embed/v1.js';
+                s.onload = function () {
+                    if (pendingTwitch) { const p = pendingTwitch; pendingTwitch = null; doTwitch(p); }
+                };
+                document.head.appendChild(s);
+            }
+            return;
+        }
+
+        if (player && apiReady) { player.stopVideo(); }
+        curVideo = null;
+        playerEl().style.display = 'none';
+        imgEl.style.display = 'none';
+        imgEl.src = '';
+        looping = d.loop === true;
+
+        killTwitch();
+        twitchEl.style.display = 'block';
+
+        const opts = {
+            width: '100%', height: '100%',
+            parent: [location.hostname],
+            autoplay: true, muted: false
+        };
+        if (d.video) {
+            opts.video = d.video;
+            if (d.start && d.start > 0) { opts.time = Math.floor(d.start) + 's'; }
+        } else {
+            opts.channel = d.channel;
+        }
+
+        twitch = new Twitch.Player('twitch', opts);
+        twitch.addEventListener(Twitch.Player.READY, function () {
+            twitch.setMuted(false);
+            twitch.setVolume(Math.max(0, Math.min(100, d.volume || 0)) / 100);
+        });
+        twitch.addEventListener(Twitch.Player.ENDED, function () {
+            if (looping && d.video && twitch) {
+                twitch.seek(0);
+                twitch.play();
+            }
+        });
+    }
+
     function doPlay(d) {
+        killTwitch();
         imgEl.style.display = 'none';
         imgEl.src = '';
         curVideo = d.videoId;
@@ -72,6 +138,7 @@
 
     function doImage(url) {
         if (player && apiReady) { player.stopVideo(); }
+        killTwitch();
         curVideo = null;
         playerEl().style.display = 'none';
         imgEl.src = url;
@@ -80,6 +147,8 @@
 
     function doStop() {
         if (player && apiReady) { player.stopVideo(); }
+        killTwitch();
+        pendingTwitch = null;
         curVideo = null;
         playerEl().style.display = 'none';
         imgEl.style.display = 'none';
@@ -94,12 +163,18 @@
             case 'play':
                 if (apiReady) { doPlay(d); } else { pending = d; }
                 break;
+            case 'twitch':
+                doTwitch(d);
+                break;
             case 'image':
                 doImage(d.url);
                 break;
-            case 'volume':
-                if (player && apiReady) { player.setVolume(Math.max(0, Math.min(100, d.volume || 0))); }
+            case 'volume': {
+                const v = Math.max(0, Math.min(100, d.volume || 0));
+                if (twitch) { twitch.setVolume(v / 100); }
+                else if (player && apiReady) { player.setVolume(v); }
                 break;
+            }
             case 'loop':
                 looping = d.loop === true;
                 break;
