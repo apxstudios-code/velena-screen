@@ -155,6 +155,13 @@
         imgEl.src = '';
     }
 
+    // Browser-Testmodus: Seite direkt mit Query-Parametern aufrufen, z.B.
+    //   ?twitch=kanalname   oder   ?yt=VIDEOID   oder   ?img=https://...
+    const qs = new URLSearchParams(location.search);
+    if (qs.get('twitch')) { doTwitch({ channel: qs.get('twitch'), volume: 50 }); }
+    if (qs.get('img'))    { doImage(qs.get('img')); }
+    if (qs.get('yt'))     { pending = { videoId: qs.get('yt'), start: 0, volume: 50 }; }
+
     window.addEventListener('message', function (event) {
         const d = event.data;
         if (!d || !d.action) return;
