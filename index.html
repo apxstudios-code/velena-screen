@@ -103,12 +103,14 @@
         curVideo = null;
         syncBase = null; // Twitch synct sich selbst (live) bzw. via time-Param
         playerEl().style.display = 'none';
-        imgEl.style.display = 'none';
-        imgEl.src = '';
         looping = d.loop === true;
 
         killTwitch();
         twitchEl.style.display = 'block';
+
+        // Optionales Bild ÜBER dem Twitch-Stream (Ton läuft weiter)
+        if (d.visual) { imgEl.src = d.visual; imgEl.style.display = 'block'; }
+        else { imgEl.style.display = 'none'; imgEl.src = ''; }
 
         const opts = {
             width: '100%', height: '100%',
@@ -187,11 +189,13 @@
     function doPlay(d) {
         killTwitch();
         killVideo();
-        imgEl.style.display = 'none';
-        imgEl.src = '';
         curVideo = d.videoId;
         looping  = d.loop === true;
         playerEl().style.display = 'block';
+
+        // Optionales Bild ÜBER dem (laufenden) Video: zeigt Bild, Ton läuft weiter
+        if (d.visual) { imgEl.src = d.visual; imgEl.style.display = 'block'; }
+        else { imgEl.style.display = 'none'; imgEl.src = ''; }
 
         // Zeitlinien-Anker (inkl. Wartezeit bis YT-API bereit war)
         syncBase = (d._t || Date.now()) - (d.start || 0) * 1000;
